@@ -6,7 +6,7 @@
 // The tokenizer config can be retrieved from:
 // https://huggingface.co/hf-internal-testing/llama-tokenizer/raw/main/tokenizer.json
 
-#[cfg(feature = "mkl")]
+#[cfg(any(feature = "mkl", feature = "mkl-dynamic"))]
 extern crate intel_mkl_src;
 
 use anyhow::{bail, Error as E, Result};

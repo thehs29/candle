@@ -55,7 +55,7 @@ mod indexer;
 pub mod layout;
 #[cfg(feature = "metal")]
 pub mod metal_backend;
-#[cfg(feature = "mkl")]
+#[cfg(any(feature = "mkl", feature = "mkl-dynamic"))]
 mod mkl;
 pub mod npy;
 mod op;
@@ -96,7 +96,7 @@ pub use metal_backend::{MetalDevice, MetalError, MetalStorage};
 #[cfg(not(feature = "metal"))]
 pub use dummy_metal_backend::{MetalDevice, MetalError, MetalStorage};
 
-#[cfg(feature = "mkl")]
+#[cfg(any(feature = "mkl", feature = "mkl-dynamic"))]
 extern crate intel_mkl_src;
 
 #[cfg(feature = "accelerate")]
