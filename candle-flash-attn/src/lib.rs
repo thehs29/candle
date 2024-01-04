@@ -3,7 +3,7 @@ mod ffi;
 use candle::backend::BackendStorage;
 use candle::cuda_backend::cudarc::driver::DevicePtr;
 use candle::cuda_backend::WrapErr;
-use candle::{CpuStorage, Layout, Result, Shape, Tensor};
+use candle::{CpuStorage, DType, Layout, Result, Shape, Tensor};
 use half::{bf16, f16};
 
 pub struct FlashAttn {
@@ -87,42 +87,46 @@ impl FlashAttn {
             candle::bail!("number of k/v heads {num_heads_k} must divide number of heads in query {num_heads}")
         }
 
-        let (alibi_slopes_ptr, alibi_slopes_batch_stride) =
-            if let Some(alibi_slopes) = &self.alibi_slopes {
-                let (alibi_slopes, alibi_slopes_layout) = alibi_slopes.storage_and_layout();
+        let alibi_slopes_ptr = if let Some(alibi_slopes) = &self.alibi_slopes {
+            if alibi_slopes.dtype() != DType::F32 {
+                candle::bail!(
+                    "DType mismatch alibi_slopes {:?}, expected {:?}",
+                    alibi_slopes.dtype(),
+                    DType::F32
+                );
+            }
 
-                if num_heads != alibi_slopes_layout.shape().dims1()? {
-                    candle::bail!(
-                        "shape mismatch alibi_slopes {:?}, expected {:?}",
-                        alibi_slopes_layout.shape(),
-                        (num_heads)
-                    );
-                }
+            let (alibi_slopes, alibi_slopes_layout) = alibi_slopes.storage_and_layout();
 
-                let alibi_slopes = match &*alibi_slopes {
-                    candle::Storage::Cuda(c) => c.as_cuda_slice::<T>()?,
-                    _ => candle::bail!("alibi_slopes must be a cuda tensor"),
-                };
+            if num_heads != alibi_slopes_layout.shape().dims1()? {
+                candle::bail!(
+                    "shape mismatch alibi_slopes {:?}, expected {:?}",
+                    alibi_slopes_layout.shape(),
+                    (num_heads)
+                );
+            }
 
-                let alibi_slopes = alibi_slopes.slice(alibi_slopes_layout.start_offset()..);
-
-                (
-                    *alibi_slopes.device_ptr() as *const core::ffi::c_void,
-                    alibi_slopes_layout.stride()[0] as u32,
-                )
-            } else {
-                (std::ptr::null(), 0_u32)
+            let alibi_slopes = match &*alibi_slopes {
+                candle::Storage::Cuda(c) => c.as_cuda_slice::<f32>()?,
+                _ => candle::bail!("alibi_slopes must be a cuda tensor"),
             };
 
+            let alibi_slopes = alibi_slopes.slice(alibi_slopes_layout.start_offset()..);
+
+            *alibi_slopes.device_ptr() as *const core::ffi::c_void
+        } else {
+            std::ptr::null()
+        };
+
         // if window_size_left > self.max_seqlen_k or None => -1
-        let window_size_left = self
+        let mut window_size_left = self
             .window_size_left
             .filter(|v| v <= &seqlen_k)
             .map(|v| v as i32)
             .unwrap_or(-1);
 
         // if window_size_right > self.max_seqlen_k or None => -1
-        let window_size_right = self
+        let mut window_size_right = self
             .window_size_right
             .filter(|v| v <= &seqlen_k)
             .map(|v| v as i32)
@@ -138,6 +142,20 @@ impl FlashAttn {
         let softmax_lse = dev.alloc_zeros::<f32>(b_sz * num_heads * seqlen_q).w()?;
 
         let is_bf16 = if is_bf16 { 1 } else { 0 };
+
+        // Causal is the special case where window_size_right == 0 and window_size_left < 0.
+        // Local is the more general case where window_size_right >= 0 or window_size_left >= 0.
+        let is_causal = if window_size_left < 0 && window_size_right == 0 {
+            1
+        } else {
+            0
+        };
+        if window_size_left < 0 && window_size_right >= 0 {
+            window_size_left = seqlen_k as i32;
+        }
+        if window_size_left >= 0 && window_size_right < 0 {
+            window_size_right = seqlen_k as i32;
+        }
 
         unsafe {
             let q_ptr = *q.device_ptr() as *const core::ffi::c_void;
@@ -158,7 +176,7 @@ impl FlashAttn {
                 /* k_batch_stride */ k_stride[0] as u32,
                 /* v_batch_stride */ v_stride[0] as u32,
                 /* o_batch_stride */ o_stride[0] as u32,
-                /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride,
+                /* alibi_slopes_batch_stride */ 0,
                 /* q_row_stride   */ q_stride[q_rank - 3] as u32,
                 /* k_row_stride   */ k_stride[k_rank - 3] as u32,
                 /* v_row_stride   */ v_stride[v_rank - 3] as u32,
@@ -178,6 +196,7 @@ impl FlashAttn {
                 /* seqlen_q_rounded */ seqlen_q_rounded as u32,
                 /* seqlen_k_rounded */ seqlen_k_rounded as u32,
                 /* is_bf16 */ is_bf16,
+                /* is_causal */ is_causal,
                 /* window_size_left */ window_size_left,
                 /* window_size_right */ window_size_right,
             )
@@ -476,42 +495,46 @@ impl FlashAttnVarLen {
 
         let batch_size = nseqlens_q - 1;
 
-        let (alibi_slopes_ptr, alibi_slopes_batch_stride) =
-            if let Some(alibi_slopes) = &self.alibi_slopes {
-                let (alibi_slopes, alibi_slopes_layout) = alibi_slopes.storage_and_layout();
+        let alibi_slopes_ptr = if let Some(alibi_slopes) = &self.alibi_slopes {
+            if alibi_slopes.dtype() != DType::F32 {
+                candle::bail!(
+                    "DType mismatch alibi_slopes {:?}, expected {:?}",
+                    alibi_slopes.dtype(),
+                    DType::F32
+                );
+            }
 
-                if num_heads != alibi_slopes_layout.shape().dims1()? {
-                    candle::bail!(
-                        "shape mismatch alibi_slopes {:?}, expected {:?}",
-                        alibi_slopes_layout.shape(),
-                        (num_heads)
-                    );
-                }
+            let (alibi_slopes, alibi_slopes_layout) = alibi_slopes.storage_and_layout();
 
-                let alibi_slopes = match &*alibi_slopes {
-                    candle::Storage::Cuda(c) => c.as_cuda_slice::<T>()?,
-                    _ => candle::bail!("alibi_slopes must be a cuda tensor"),
-                };
+            if num_heads != alibi_slopes_layout.shape().dims1()? {
+                candle::bail!(
+                    "shape mismatch alibi_slopes {:?}, expected {:?}",
+                    alibi_slopes_layout.shape(),
+                    (num_heads)
+                );
+            }
 
-                let alibi_slopes = alibi_slopes.slice(alibi_slopes_layout.start_offset()..);
-
-                (
-                    *alibi_slopes.device_ptr() as *const core::ffi::c_void,
-                    alibi_slopes_layout.stride()[0] as u32,
-                )
-            } else {
-                (std::ptr::null(), 0_u32)
+            let alibi_slopes = match &*alibi_slopes {
+                candle::Storage::Cuda(c) => c.as_cuda_slice::<f32>()?,
+                _ => candle::bail!("alibi_slopes must be a cuda tensor"),
             };
 
+            let alibi_slopes = alibi_slopes.slice(alibi_slopes_layout.start_offset()..);
+
+            *alibi_slopes.device_ptr() as *const core::ffi::c_void
+        } else {
+            std::ptr::null()
+        };
+
         // if window_size_left > self.max_seqlen_k or None => -1
-        let window_size_left = self
+        let mut window_size_left = self
             .window_size_left
             .filter(|v| v <= &self.max_seqlen_k)
             .map(|v| v as i32)
             .unwrap_or(-1);
 
         // if window_size_right > self.max_seqlen_k or None => -1
-        let window_size_right = self
+        let mut window_size_right = self
             .window_size_right
             .filter(|v| v <= &self.max_seqlen_k)
             .map(|v| v as i32)
@@ -529,6 +552,20 @@ impl FlashAttnVarLen {
             .w()?;
 
         let is_bf16 = if is_bf16 { 1 } else { 0 };
+
+        // Causal is the special case where window_size_right == 0 and window_size_left < 0.
+        // Local is the more general case where window_size_right >= 0 or window_size_left >= 0.
+        let is_causal = if window_size_left < 0 && window_size_right == 0 {
+            1
+        } else {
+            0
+        };
+        if window_size_left < 0 && window_size_right >= 0 {
+            window_size_left = self.max_seqlen_k as i32;
+        }
+        if window_size_left >= 0 && window_size_right < 0 {
+            window_size_right = self.max_seqlen_k as i32;
+        }
 
         unsafe {
             let q_ptr = *q.device_ptr() as *const core::ffi::c_void;
@@ -551,7 +588,7 @@ impl FlashAttnVarLen {
                 /* k_batch_stride */ 0,
                 /* v_batch_stride */ 0,
                 /* o_batch_stride */ 0,
-                /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride,
+                /* alibi_slopes_batch_stride */ 0,
                 /* q_row_stride   */ q_stride[q_rank - 3] as u32,
                 /* k_row_stride   */ k_stride[k_rank - 3] as u32,
                 /* v_row_stride   */ v_stride[v_rank - 3] as u32,
@@ -571,6 +608,7 @@ impl FlashAttnVarLen {
                 /* seqlen_q_rounded */ seqlen_q_rounded as u32,
                 /* seqlen_k_rounded */ seqlen_k_rounded as u32,
                 /* is_bf16 */ is_bf16,
+                /* is_causal */ is_causal,
                 /* window_size_left */ window_size_left,
                 /* window_size_right */ window_size_right,
             )
