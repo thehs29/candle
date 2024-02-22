@@ -11,17 +11,17 @@ readme = "README.md"
 
 [dependencies]
 accelerate-src = { workspace = true, optional = true }
-candle = { path = "../candle-core", version = "0.3.3", package = "candle-core" }
-candle-datasets = { path = "../candle-datasets", version = "0.3.3" }
-candle-nn = { path = "../candle-nn", version = "0.3.3" }
-candle-transformers = { path = "../candle-transformers", version = "0.3.3" }
-candle-flash-attn = { path = "../candle-flash-attn", version = "0.3.3", optional = true }
-candle-onnx = { path = "../candle-onnx", version = "0.3.3", optional = true }
+candle = { workspace = true }
+candle-datasets = { workspace = true }
+candle-nn = { workspace = true }
+candle-transformers = { workspace = true }
+candle-flash-attn = { workspace = true, optional = true }
+candle-onnx = { workspace = true, optional = true }
 
 csv = "1.3.0"
 cudarc = { workspace = true, optional = true }
 half = { workspace = true, optional = true }
-hf-hub = { workspace = true, features=["tokio"]}
+hf-hub = { workspace = true, features = ["tokio"] }
 image = { workspace = true }
 intel-mkl-src = { workspace = true, optional = true }
 num-traits = { workspace = true }
@@ -30,7 +30,9 @@ rayon = { workspace = true }
 safetensors = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+symphonia = { version = "0.5.3", features = ["all"] }
 tokenizers = { workspace = true, features = ["onig"] }
+cpal= { version = "0.15.2", optional = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }
@@ -43,23 +45,24 @@ rusttype = { workspace = true }
 tracing = { workspace = true }
 tracing-chrome = { workspace = true }
 tracing-subscriber = { workspace = true }
-wav = { workspace = true }
 # Necessary to disambiguate with tokio in wasm examples which are 1.28.1
 tokio = "1.29.1"
 
 [build-dependencies]
 anyhow = { workspace = true }
+bindgen_cuda = { version = "0.1.1", optional = true }
 
 [features]
 default = []
 accelerate = ["dep:accelerate-src", "candle/accelerate", "candle-nn/accelerate", "candle-transformers/accelerate"]
-cuda = ["candle/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+cuda = ["candle/cuda", "candle-nn/cuda", "candle-transformers/cuda", "dep:bindgen_cuda"]
 cudnn = ["candle/cudnn"]
 flash-attn = ["cuda", "candle-transformers/flash-attn", "dep:candle-flash-attn"]
 mkl = ["dep:intel-mkl-src", "candle/mkl", "candle-nn/mkl", "candle-transformers/mkl"]
 nccl = ["cuda", "cudarc/nccl", "dep:half"]
 onnx = ["candle-onnx"]
 metal = ["candle/metal", "candle-nn/metal"]
+microphone = ["cpal"]
 
 [[example]]
 name = "llama_multiprocess"
@@ -76,3 +79,7 @@ required-features = ["onnx"]
 [[example]]
 name = "onnx_basics"
 required-features = ["onnx"]
+
+[[example]]
+name = "whisper-microphone"
+required-features = ["microphone"]

@@ -63,10 +63,13 @@ We also provide a some command line based examples using state of the art models
 - [LLaMA and LLaMA-v2](./candle-examples/examples/llama/): general LLM, includes
   the SOLAR-10.7B variant.
 - [Falcon](./candle-examples/examples/falcon/): general LLM.
+- [Gemma](./candle-examples/examples/gemma/): 2b and 7b general LLMs from Google
+  Deepmind.
 - [Phi-1, Phi-1.5, and Phi-2](./candle-examples/examples/phi/): 1.3b and 2.7b general LLMs with performance on par with LLaMA-v2 7b.
 - [StableLM-3B-4E1T](./candle-examples/examples/stable-lm/): a 3b general LLM
-  pre-trained on 1T tokens of English and code datasets.
-- [Minimal Mamba](./candle-examples/examples/minimal-mamba/): a minimal
+  pre-trained on 1T tokens of English and code datasets. Also supports
+  StableLM-2, a 1.6b LLM trained on 2T tokens, as well as the code variants.
+- [Mamba](./candle-examples/examples/mamba/): an inference only
   implementation of the Mamba state space model.
 - [Mistral7b-v0.1](./candle-examples/examples/mistral/): a 7b general LLM with
   better performance than all publicly available 13b models as of 2023-09-28.
@@ -74,6 +77,9 @@ We also provide a some command line based examples using state of the art models
   experts 8x7b general LLM with better performance than a Llama 2 70B model with
   much faster inference.
 - [StarCoder](./candle-examples/examples/bigcode/): LLM specialized to code generation.
+- [Qwen1.5](./candle-examples/examples/qwen/): Bilingual (English/Chinese) LLMs.
+- [RWKV v5](./candle-examples/examples/rwkv/): An RNN with transformer level LLM
+  performance.
 - [Replit-code-v1.5](./candle-examples/examples/replit-code/): a 3.3b LLM specialized for code completion.
 - [Yi-6B / Yi-34B](./candle-examples/examples/yi/): two bilingual
   (English/Chinese) general LLMs with 6b and 34b parameters.
@@ -109,8 +115,12 @@ We also provide a some command line based examples using state of the art models
 - [DINOv2](./candle-examples/examples/dinov2/): computer vision model trained
   using self-supervision (can be used for imagenet classification, depth
   evaluation, segmentation).
+- [VGG](./candle-examples/examples/vgg/),
+  [RepVGG](./candle-examples/examples/repvgg): computer vision models.
 - [BLIP](./candle-examples/examples/blip/): image to text model, can be used to
   generate captions for an image.
+- [TrOCR](./candle-examples/examples/trocr/): a transformer OCR model, with
+  dedicated submodels for hand-writing and printed recognition.
 - [Marian-MT](./candle-examples/examples/marian-mt/): neural machine translation
   model, generates the translated text from the input text.
 
@@ -158,6 +168,7 @@ And then head over to
 - [`candle-ext`](https://github.com/mokeyish/candle-ext): An extension library to Candle that provides PyTorch functions not currently available in Candle.
 - [`kalosm`](https://github.com/floneum/floneum/tree/master/interfaces/kalosm): A multi-modal meta-framework in Rust for interfacing with local pre-trained models with support for controlled generation, custom samplers, in-memory vector databases, audio transcription, and more.
 - [`candle-sampling`](https://github.com/EricLBuehler/candle-sampling): Sampling techniques for Candle.
+- [`gpt-from-scratch-rs`](https://github.com/jeroenvlek/gpt-from-scratch-rs): A port of Andrej Karpathy's _Let's build GPT_ tutorial on YouTube showcasing the Candle API on a toy problem.
 
 If you have an addition to this list, please submit a pull request.
 
@@ -180,13 +191,16 @@ If you have an addition to this list, please submit a pull request.
         - Falcon.
         - StarCoder.
         - Phi 1, 1.5, and 2.
-        - Minimal Mamba
+        - Mamba, Minimal Mamba
+        - Gemma 2b and 7b.
         - Mistral 7b v0.1.
         - Mixtral 8x7b v0.1.
-        - StableLM-3B-4E1T.
+        - StableLM-3B-4E1T, StableLM-2-1.6B, Stable-Code-3B.
         - Replit-code-v1.5-3B.
         - Bert.
         - Yi-6B and Yi-34B.
+        - Qwen1.5.
+        - RWKV.
     - Quantized LLMs.
         - Llama 7b, 13b, 70b, as well as the chat and code variants.
         - Mistral 7b, and 7b instruct.
@@ -202,8 +216,10 @@ If you have an addition to this list, please submit a pull request.
         - Wurstchen v2.
     - Image to text.
         - BLIP.
+        - TrOCR.
     - Computer Vision Models.
-        - DINOv2, ConvMixer, EfficientNet, ResNet, ViT.
+        - DINOv2, ConvMixer, EfficientNet, ResNet, ViT, VGG, RepVGG, ConvNeXT,
+          ConvNeXTv2.
         - yolo-v3, yolo-v8.
         - Segment-Anything Model (SAM).
 - File formats: load models from safetensors, npz, ggml, or PyTorch files.

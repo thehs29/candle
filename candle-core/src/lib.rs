@@ -72,7 +72,7 @@ pub mod utils;
 mod variable;
 
 pub use cpu_backend::CpuStorage;
-pub use device::{Device, DeviceLocation};
+pub use device::{Device, DeviceLocation, NdArray};
 pub use dtype::{DType, FloatDType, IntDType, WithDType};
 pub use error::{Error, Result};
 pub use indexer::IndexOp;
@@ -126,6 +126,15 @@ pub trait Module {
 impl<T: Fn(&Tensor) -> Result<Tensor>> Module for T {
     fn forward(&self, xs: &Tensor) -> Result<Tensor> {
         self(xs)
+    }
+}
+
+impl<M: Module> Module for Option<&M> {
+    fn forward(&self, xs: &Tensor) -> Result<Tensor> {
+        match self {
+            None => Ok(xs.clone()),
+            Some(m) => m.forward(xs),
+        }
     }
 }
 
