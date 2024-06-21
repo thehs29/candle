@@ -30,6 +30,14 @@ enum Which {
     InstructV1_1_2B,
     #[value(name = "1.1-7b-it")]
     InstructV1_1_7B,
+    #[value(name = "code-2b")]
+    CodeBase2B,
+    #[value(name = "code-7b")]
+    CodeBase7B,
+    #[value(name = "code-2b-it")]
+    CodeInstruct2B,
+    #[value(name = "code-7b-it")]
+    CodeInstruct7B,
 }
 
 struct TextGeneration {
@@ -185,6 +193,9 @@ struct Args {
     /// The model to use.
     #[arg(long, default_value = "2b")]
     which: Which,
+
+    #[arg(long)]
+    use_flash_attn: bool,
 }
 
 fn main() -> Result<()> {
@@ -224,6 +235,10 @@ fn main() -> Result<()> {
             Which::Base7B => "google/gemma-7b".to_string(),
             Which::Instruct2B => "google/gemma-2b-it".to_string(),
             Which::Instruct7B => "google/gemma-7b-it".to_string(),
+            Which::CodeBase2B => "google/codegemma-2b".to_string(),
+            Which::CodeBase7B => "google/codegemma-7b".to_string(),
+            Which::CodeInstruct2B => "google/codegemma-2b-it".to_string(),
+            Which::CodeInstruct7B => "google/codegemma-7b-it".to_string(),
         },
     };
     let repo = api.repo(Repo::with_revision(
@@ -258,7 +273,7 @@ fn main() -> Result<()> {
         DType::F32
     };
     let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
-    let model = Model::new(&config, vb)?;
+    let model = Model::new(args.use_flash_attn, &config, vb)?;
 
     println!("loaded the model in {:?}", start.elapsed());
 

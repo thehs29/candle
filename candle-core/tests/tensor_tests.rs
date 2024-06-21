@@ -96,6 +96,40 @@ fn clamp(device: &Device) -> Result<()> {
     Ok(())
 }
 
+fn asort(device: &Device) -> Result<()> {
+    let data = &[[3f32, 1., 4., 1.1, 5.], [2.1, 1., 7., 8., 2.]];
+    let tensor = Tensor::new(data, device)?;
+    let indexes = tensor.arg_sort_last_dim(true)?;
+    assert_eq!(
+        indexes.to_vec2::<u32>()?,
+        [[1, 3, 0, 2, 4], [1, 4, 0, 2, 3]],
+    );
+    let indexes = tensor.arg_sort_last_dim(false)?;
+    assert_eq!(
+        indexes.to_vec2::<u32>()?,
+        [[4, 2, 0, 3, 1], [3, 2, 0, 4, 1]],
+    );
+    let (sorted, indexes) = tensor.sort_last_dim(true)?;
+    assert_eq!(
+        indexes.to_vec2::<u32>()?,
+        [[1, 3, 0, 2, 4], [1, 4, 0, 2, 3]],
+    );
+    assert_eq!(
+        sorted.to_vec2::<f32>()?,
+        [[1.0, 1.1, 3.0, 4.0, 5.0], [1.0, 2.0, 2.1, 7.0, 8.0]]
+    );
+    let (sorted, indexes) = tensor.sort_last_dim(false)?;
+    assert_eq!(
+        indexes.to_vec2::<u32>()?,
+        [[4, 2, 0, 3, 1], [3, 2, 0, 4, 1]],
+    );
+    assert_eq!(
+        sorted.to_vec2::<f32>()?,
+        [[5.0, 4.0, 3.0, 1.1, 1.0], [8.0, 7.0, 2.1, 2.0, 1.0]]
+    );
+    Ok(())
+}
+
 fn unary_op(device: &Device) -> Result<()> {
     let data = &[[-3f32, 1., 4., -0.1, 0.5], [2.7, -1.8, -0.28, 1.8, 2.8]];
     let tensor = Tensor::new(data, device)?;
@@ -631,6 +665,30 @@ fn broadcast(device: &Device) -> Result<()> {
     Ok(())
 }
 
+fn slice_set(device: &Device) -> Result<()> {
+    let (b, h, max_t, d) = (2, 4, 7, 3);
+    let cache = Tensor::zeros((b, h, max_t, d), DType::F32, device)?;
+    let tensor = Tensor::randn(0f32, 1f32, (b, h, 4, d), device)?;
+    cache.slice_set(&tensor, 2, 0)?;
+    let cache_t = cache.narrow(2, 0, 4)?;
+    let diff = (cache_t - &tensor)?.abs()?.sum_all()?.to_vec0::<f32>()?;
+    assert_eq!(diff, 0.);
+    cache.slice_set(&tensor, 2, 1)?;
+    let cache_t = cache.narrow(2, 1, 4)?;
+    let diff = (cache_t - &tensor)?.abs()?.sum_all()?.to_vec0::<f32>()?;
+    assert_eq!(diff, 0.);
+    let ones = Tensor::ones((b, h, 1, d), DType::F32, device)?;
+    cache.slice_set(&ones, 2, 6)?;
+    let diff = cache.narrow(2, 5, 1)?.abs()?.sum_all()?.to_vec0::<f32>()?;
+    assert_eq!(diff, 0.);
+    let diff = (cache.narrow(2, 6, 1)? - 1.)?
+        .abs()?
+        .sum_all()?
+        .to_vec0::<f32>()?;
+    assert_eq!(diff, 0.);
+    Ok(())
+}
+
 fn cat(device: &Device) -> Result<()> {
     // 1D
     let t1 = Tensor::new(&[3f32, 1., 4.], device)?;
@@ -1083,6 +1141,27 @@ fn randn(device: &Device) -> Result<()> {
     Ok(())
 }
 
+fn zero_dim(device: &Device) -> Result<()> {
+    let t = Tensor::zeros((4, 0, 1), DType::F32, device)?;
+    assert_eq!(t.dims3()?, (4, 0, 1));
+    let t2 = Tensor::zeros((4, 3, 1), DType::F32, device)?;
+    let t_cat = Tensor::cat(&[&t, &t2], 1)?;
+    assert_eq!(t_cat.dims3()?, (4, 3, 1));
+    let t_cat = Tensor::cat(&[&t, &t], 1)?;
+    assert_eq!(t_cat.dims3()?, (4, 0, 1));
+    let t_unary = t.sqrt()?;
+    assert_eq!(t_unary.dims3()?, (4, 0, 1));
+    let t_plus = (&t + 1.)?;
+    assert_eq!(t_plus.dims3()?, (4, 0, 1));
+    let t_mm = t2.matmul(&t.t()?)?;
+    assert_eq!(t_mm.dims3()?, (4, 3, 0));
+    let t_mm = t.matmul(&t2.t()?)?;
+    assert_eq!(t_mm.dims3()?, (4, 0, 3));
+    let t_mm = t.t()?.matmul(&t)?;
+    assert_eq!(t_mm.dims3()?, (4, 1, 1));
+    Ok(())
+}
+
 test_device!(zeros, zeros_cpu, zeros_gpu, zeros_metal);
 test_device!(ones, ones_cpu, ones_gpu, ones_metal);
 test_device!(full, full_cpu, full_gpu, full_metal);
@@ -1091,6 +1170,7 @@ test_device!(add_mul, add_mul_cpu, add_mul_gpu, add_mul_metal);
 test_device!(tensor_2d, tensor_2d_cpu, tensor_2d_gpu, tensor_2d_metal);
 test_device!(narrow, narrow_cpu, narrow_gpu, narrow_metal);
 test_device!(broadcast, broadcast_cpu, broadcast_gpu, broadcast_metal);
+test_device!(slice_set, ss_cpu, ss_gpu, ss_metal);
 test_device!(cat, cat_cpu, cat_gpu, cat_metal);
 test_device!(sum, sum_cpu, sum_gpu, sum_metal);
 test_device!(min, min_cpu, min_gpu, min_metal);
@@ -1130,7 +1210,9 @@ test_device!(
 );
 test_device!(randn, randn_cpu, randn_gpu, randn_metal);
 test_device!(clamp, clamp_cpu, clamp_gpu, clamp_metal);
+test_device!(asort, asort_cpu, asort_gpu, asort_metal);
 test_device!(var, var_cpu, var_gpu, var_metal);
+test_device!(zero_dim, zero_dim_cpu, zero_dim_gpu, zero_dim_metal);
 
 // There was originally a bug on the CPU implementation for randn
 // https://github.com/huggingface/candle/issues/381

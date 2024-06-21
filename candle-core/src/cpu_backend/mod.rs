@@ -10,7 +10,7 @@ pub use utils::{
 };
 
 const USE_IM2COL_CONV1D: bool = true;
-const USE_IM2COL_CONV1D_TR: bool = true;
+const USE_COL2IM_CONV1D_TR: bool = true;
 const USE_IM2COL_CONV2D: bool = true;
 
 // TODO: Maybe we should not implement [Clone] here and instead have an explicit allocator +
@@ -24,6 +24,17 @@ pub enum CpuStorage {
     F16(Vec<f16>),
     F32(Vec<f32>),
     F64(Vec<f64>),
+}
+
+#[derive(Debug, Clone)]
+pub enum CpuStorageRef<'a> {
+    U8(&'a [u8]),
+    U32(&'a [u32]),
+    I64(&'a [i64]),
+    BF16(&'a [bf16]),
+    F16(&'a [f16]),
+    F32(&'a [f32]),
+    F64(&'a [f64]),
 }
 
 #[derive(Debug, Clone)]
@@ -110,7 +121,8 @@ impl ReduceIndex {
         let dst_len = src_l.shape().elem_count() / reduce_dim_size;
         let mut dst: Vec<U> = Vec::with_capacity(dst_len);
         let dst_to_set = dst.spare_capacity_mut();
-        let dst_to_set = unsafe { std::mem::transmute::<_, &mut [U]>(dst_to_set) };
+        let dst_to_set =
+            unsafe { std::mem::transmute::<&mut [std::mem::MaybeUninit<U>], &mut [U]>(dst_to_set) };
         match src_l.contiguous_offsets() {
             Some((o1, o2)) => {
                 let src = &src[o1..o2];
@@ -2238,7 +2250,7 @@ impl BackendStorage for CpuStorage {
             && params.dilation == 1
             && params.padding == 0
             && params.output_padding == 0;
-        if USE_IM2COL_CONV1D_TR && can_use_col2im {
+        if USE_COL2IM_CONV1D_TR && can_use_col2im {
             let (b_size, c_in, l_in) = l.shape().dims3()?;
             let (c_in2, c_out, k_size) = kernel_l.shape().dims3()?;
             if !kernel_l.is_contiguous() {
@@ -2445,6 +2457,10 @@ impl BackendDevice for CpuDevice {
         true
     }
 
+    fn storage_from_slice<T: crate::WithDType>(&self, s: &[T]) -> Result<Self::Storage> {
+        Ok(T::to_cpu_storage(s))
+    }
+
     fn storage_from_cpu_storage(&self, s: &CpuStorage) -> Result<Self::Storage> {
         Ok(s.clone())
     }
@@ -2627,6 +2643,10 @@ impl BackendDevice for CpuDevice {
             DType::F64 => CpuStorage::F64(vec![0f64; elem_count]),
         };
         Ok(storage)
+    }
+
+    fn synchronize(&self) -> Result<()> {
+        Ok(())
     }
 }
 
