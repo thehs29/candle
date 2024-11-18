@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::models::{
     clip::{text_model::Activation, vision_model::ClipVisionConfig},
-    llama::Config,
+    llama::{Config, LlamaEosToks},
 };
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +43,7 @@ pub struct LLaVAConfig {
     pub image_token_index: isize,
     #[serde(default = "default_hf")]
     pub hf: bool,
+    pub tie_word_embeddings: Option<bool>,
 }
 
 fn default_hf() -> bool {
@@ -73,8 +74,11 @@ impl LLaVAConfig {
             rms_norm_eps: self.rms_norm_eps as f64,
             rope_theta: self.rope_theta,
             bos_token_id: Some(self.bos_token_id as u32),
-            eos_token_id: Some(self.eos_token_id as u32),
+            eos_token_id: Some(LlamaEosToks::Single(self.eos_token_id as u32)),
             use_flash_attn: false,
+            rope_scaling: None, // Assume we don't have LLaVA for Llama 3.1
+            max_position_embeddings: self.max_position_embeddings,
+            tie_word_embeddings: self.tie_word_embeddings.unwrap_or(false),
         }
     }
 }
@@ -262,6 +266,7 @@ impl HFLLaVAConfig {
             use_cache: self.text_config.use_cache,
             vocab_size: self.vocab_size,
             image_token_index: self.image_token_index,
+            tie_word_embeddings: None,
         }
     }
 }
