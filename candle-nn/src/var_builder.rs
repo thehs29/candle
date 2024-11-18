@@ -1,3 +1,5 @@
+//! A `VarBuilder` for variable retrieval from models
+//!
 //! A `VarBuilder` is used to retrieve variables used by a model. These variables can either come
 //! from a pre-trained checkpoint, e.g. using `VarBuilder::from_mmaped_safetensors`, or initialized
 //! for training, e.g. using `VarBuilder::from_varmap`.
@@ -14,6 +16,7 @@ use std::sync::Arc;
 pub struct VarBuilderArgs<'a, B: Backend> {
     data: Arc<TensorData<B>>,
     path: Vec<String>,
+    pub dtype: DType,
     _phantom: std::marker::PhantomData<&'a B>,
 }
 
@@ -22,6 +25,7 @@ impl<'a, B: Backend> Clone for VarBuilderArgs<'a, B> {
         Self {
             data: self.data.clone(),
             path: self.path.clone(),
+            dtype: self.dtype,
             _phantom: self._phantom,
         }
     }
@@ -33,7 +37,6 @@ pub type VarBuilder<'a> = VarBuilderArgs<'a, Box<dyn SimpleBackend + 'a>>;
 
 struct TensorData<B: Backend> {
     backend: B,
-    pub dtype: DType,
     pub device: Device,
 }
 
@@ -95,12 +98,12 @@ impl<'a, B: Backend> VarBuilderArgs<'a, B> {
     pub fn new_with_args(backend: B, dtype: DType, dev: &Device) -> Self {
         let data = TensorData {
             backend,
-            dtype,
             device: dev.clone(),
         };
         Self {
             data: Arc::new(data),
             path: vec![],
+            dtype,
             _phantom: std::marker::PhantomData,
         }
     }
@@ -115,6 +118,7 @@ impl<'a, B: Backend> VarBuilderArgs<'a, B> {
         Self {
             data: self.data.clone(),
             path: vec![],
+            dtype: self.dtype,
             _phantom: std::marker::PhantomData,
         }
     }
@@ -124,6 +128,7 @@ impl<'a, B: Backend> VarBuilderArgs<'a, B> {
         Self {
             data: self.data.clone(),
             path: vec![prefix.to_string()],
+            dtype: self.dtype,
             _phantom: std::marker::PhantomData,
         }
     }
@@ -136,6 +141,7 @@ impl<'a, B: Backend> VarBuilderArgs<'a, B> {
         Self {
             data: self.data.clone(),
             path,
+            dtype: self.dtype,
             _phantom: std::marker::PhantomData,
         }
     }
@@ -152,7 +158,17 @@ impl<'a, B: Backend> VarBuilderArgs<'a, B> {
 
     /// The dtype used by default.
     pub fn dtype(&self) -> DType {
-        self.data.dtype
+        self.dtype
+    }
+
+    /// Clone the VarBuilder tweaking its dtype
+    pub fn to_dtype(&self, dtype: DType) -> Self {
+        Self {
+            data: self.data.clone(),
+            path: self.path.clone(),
+            dtype,
+            _phantom: std::marker::PhantomData,
+        }
     }
 
     fn path(&self, tensor_name: &str) -> String {
@@ -178,7 +194,7 @@ impl<'a, B: Backend> VarBuilderArgs<'a, B> {
         name: &str,
         hints: B::Hints,
     ) -> Result<Tensor> {
-        self.get_with_hints_dtype(s, name, hints, self.data.dtype)
+        self.get_with_hints_dtype(s, name, hints, self.dtype)
     }
 
     /// Retrieve the tensor associated with the given name at the current path.
@@ -264,6 +280,7 @@ impl SimpleBackend for VarMap {
     }
 }
 
+#[allow(dead_code)]
 pub struct SafeTensorWithRouting<'a> {
     routing: HashMap<String, usize>,
     safetensors: Vec<SafeTensors<'a>>,
@@ -459,14 +476,11 @@ impl<'a> VarBuilder<'a> {
         dtype: DType,
         device: Device,
     ) -> Self {
-        let data = TensorData {
-            backend,
-            dtype,
-            device,
-        };
+        let data = TensorData { backend, device };
         Self {
             data: Arc::new(data),
             path: vec![],
+            dtype,
             _phantom: std::marker::PhantomData,
         }
     }
@@ -566,13 +580,10 @@ impl<'a> VarBuilder<'a> {
         let path = self.path.clone();
         let backend = Rename::new(self, renamer);
         let backend: Box<dyn SimpleBackend + 'a> = Box::new(backend);
-        let data = TensorData {
-            backend,
-            dtype,
-            device,
-        };
+        let data = TensorData { backend, device };
         Self {
             data: Arc::new(data),
+            dtype,
             path,
             _phantom: std::marker::PhantomData,
         }

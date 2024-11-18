@@ -4,8 +4,16 @@ use candle::{DType, Device, Module, Result, Tensor, D};
 use candle_nn::{Activation, VarBuilder};
 use std::sync::Arc;
 
+fn default_num_attention_heads() -> usize {
+    32
+}
+
 fn default_use_flash_attn() -> bool {
     false
+}
+
+fn default_hidden_act() -> candle_nn::Activation {
+    candle_nn::Activation::Silu
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
@@ -14,8 +22,11 @@ pub struct Config {
     pub hidden_size: usize,
     pub intermediate_size: usize,
     pub num_hidden_layers: usize,
+    #[serde(default = "default_num_attention_heads")]
     pub num_attention_heads: usize,
+    pub head_dim: Option<usize>,
     pub num_key_value_heads: usize,
+    #[serde(default = "default_hidden_act")]
     pub hidden_act: Activation,
     pub max_position_embeddings: usize,
     pub rms_norm_eps: f64,
@@ -34,6 +45,7 @@ impl Config {
             intermediate_size: 14336,
             num_hidden_layers: 32,
             num_attention_heads: 32,
+            head_dim: None,
             num_key_value_heads: 8,
             hidden_act: Activation::Silu,
             max_position_embeddings: 32768,
@@ -53,6 +65,7 @@ impl Config {
             intermediate_size: 14336,
             num_hidden_layers: 32,
             num_attention_heads: 32,
+            head_dim: None,
             num_key_value_heads: 8,
             hidden_act: Activation::Silu,
             max_position_embeddings: 32768,
@@ -71,6 +84,7 @@ impl Config {
             intermediate_size: 14336,
             num_hidden_layers: 32,
             num_attention_heads: 32,
+            head_dim: None,
             num_key_value_heads: 8,
             hidden_act: Activation::Silu,
             max_position_embeddings: 32768,
@@ -79,6 +93,11 @@ impl Config {
             sliding_window: Some(4096),
             use_flash_attn,
         }
+    }
+
+    fn head_dim(&self) -> usize {
+        self.head_dim
+            .unwrap_or(self.hidden_size / self.num_attention_heads)
     }
 }
 
@@ -91,21 +110,21 @@ struct RotaryEmbedding {
 impl RotaryEmbedding {
     fn new(dtype: DType, cfg: &Config, dev: &Device) -> Result<Self> {
         let rope_theta = cfg.rope_theta as f32;
-        let dim = cfg.hidden_size / cfg.num_attention_heads;
+        let dim = cfg.head_dim();
         let max_seq_len = cfg.max_position_embeddings;
         let inv_freq: Vec<_> = (0..dim)
             .step_by(2)
             .map(|i| 1f32 / rope_theta.powf(i as f32 / dim as f32))
             .collect();
         let inv_freq_len = inv_freq.len();
-        let inv_freq = Tensor::from_vec(inv_freq, (1, inv_freq_len), dev)?.to_dtype(dtype)?;
+        let inv_freq = Tensor::from_vec(inv_freq, (1, inv_freq_len), dev)?.to_dtype(DType::F32)?;
         let t = Tensor::arange(0u32, max_seq_len as u32, dev)?
-            .to_dtype(dtype)?
+            .to_dtype(DType::F32)?
             .reshape((max_seq_len, 1))?;
         let freqs = t.matmul(&inv_freq)?;
         Ok(Self {
-            sin: freqs.sin()?,
-            cos: freqs.cos()?,
+            sin: freqs.sin()?.to_dtype(dtype)?,
+            cos: freqs.cos()?.to_dtype(dtype)?,
         })
     }
 
@@ -183,7 +202,6 @@ struct Attention {
     num_kv_heads: usize,
     num_kv_groups: usize,
     head_dim: usize,
-    hidden_size: usize,
     rotary_emb: Arc<RotaryEmbedding>,
     kv_cache: Option<(Tensor, Tensor)>,
     use_flash_attn: bool,
@@ -195,7 +213,7 @@ impl Attention {
         let num_heads = cfg.num_attention_heads;
         let num_kv_heads = cfg.num_key_value_heads;
         let num_kv_groups = num_heads / num_kv_heads;
-        let head_dim = hidden_sz / num_heads;
+        let head_dim = cfg.head_dim();
         let q_proj = linear_no_bias(hidden_sz, num_heads * head_dim, vb.pp("q_proj"))?;
         let k_proj = linear_no_bias(hidden_sz, num_kv_heads * head_dim, vb.pp("k_proj"))?;
         let v_proj = linear_no_bias(hidden_sz, num_kv_heads * head_dim, vb.pp("v_proj"))?;
@@ -209,7 +227,6 @@ impl Attention {
             num_kv_heads,
             num_kv_groups,
             head_dim,
-            hidden_size: hidden_sz,
             rotary_emb,
             kv_cache: None,
             use_flash_attn: cfg.use_flash_attn,
@@ -277,7 +294,7 @@ impl Attention {
         };
         attn_output
             .transpose(1, 2)?
-            .reshape((b_sz, q_len, self.hidden_size))?
+            .reshape((b_sz, q_len, self.num_heads * self.head_dim))?
             .apply(&self.o_proj)
     }
 
@@ -397,6 +414,10 @@ impl Model {
             .to_dtype(self.dtype)
     }
 
+    pub fn embed_tokens(&self) -> &candle_nn::Embedding {
+        &self.embed_tokens
+    }
+
     pub fn forward(&mut self, input_ids: &Tensor, seqlen_offset: usize) -> Result<Tensor> {
         let (_b_size, seq_len) = input_ids.dims2()?;
         let attention_mask = if seq_len <= 1 {
@@ -408,6 +429,22 @@ impl Model {
         let mut xs = self.embed_tokens.forward(input_ids)?;
         for layer in self.layers.iter_mut() {
             xs = layer.forward(&xs, attention_mask.as_ref(), seqlen_offset)?
+        }
+        xs.narrow(1, seq_len - 1, 1)?
+            .apply(&self.norm)?
+            .apply(&self.lm_head)
+    }
+
+    pub fn forward_embeds(
+        &mut self,
+        xs: &Tensor,
+        attn_mask: Option<&Tensor>,
+        seqlen_offset: usize,
+    ) -> Result<Tensor> {
+        let (_b_size, seq_len, _) = xs.dims3()?;
+        let mut xs = xs.clone();
+        for layer in self.layers.iter_mut() {
+            xs = layer.forward(&xs, attn_mask, seqlen_offset)?
         }
         xs.narrow(1, seq_len - 1, 1)?
             .apply(&self.norm)?

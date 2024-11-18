@@ -77,7 +77,7 @@ impl ClipTextEmbeddings {
         )?;
         let position_ids =
             Tensor::arange(0u32, c.max_position_embeddings as u32, vs.device())?.unsqueeze(0)?;
-        Ok(ClipTextEmbeddings {
+        Ok(Self {
             token_embedding,
             position_embedding,
             position_ids,
@@ -249,7 +249,7 @@ impl ClipEncoder {
         let vs = vs.pp("layers");
         let mut layers: Vec<ClipEncoderLayer> = Vec::new();
         for index in 0..c.num_hidden_layers() {
-            let layer = ClipEncoderLayer::new(vs.pp(&index.to_string()), c)?;
+            let layer = ClipEncoderLayer::new(vs.pp(index.to_string()), c)?;
             layers.push(layer)
         }
         Ok(ClipEncoder { layers })
@@ -298,7 +298,7 @@ impl ClipTextTransformer {
         })
     }
 
-    // TODO: rewrrite to newer version
+    // TODO: rewrite to newer version
     fn build_causal_attention_mask(
         bsz: usize,
         seq_len: usize,
